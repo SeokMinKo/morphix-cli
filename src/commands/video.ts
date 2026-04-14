@@ -1,11 +1,124 @@
-export async function videoCommand(args: string[]): Promise<void> {
-  const subcommand = args[0]
+import { parseArgs, getString, getBool, getNumber } from '../utils/args.js'
+import { MorphixError } from '../utils/errors.js'
+import { loadConfig } from '../config/file.js'
+import { resolve } from '../config/resolver.js'
+import { registerBuiltins } from '../providers/index.js'
+import { getCapability } from '../providers/registry.js'
 
-  if (!subcommand) {
-    console.log('Usage: morphix video <subcommand> [args]')
-    console.log('Subcommands: convert, trim, compress, extract, info')
+export async function videoCommand(argv: string[]): Promise<void> {
+  const { command: sub, flags } = parseArgs(argv)
+  if (!sub || flags.help) {
+    printHelp()
     return
   }
+  registerBuiltins()
 
-  console.log(`[video] ${subcommand} — not yet implemented`)
+  switch (sub) {
+    case 'generate':
+    case 'gen':
+      return doGenerate(flags)
+    case 'poll':
+    case 'task':
+      return doPoll(flags)
+    case 'fetch':
+    case 'download':
+      return doFetch(flags)
+    default:
+      throw new MorphixError(`Unknown 'video' subcommand: '${sub}'`, {
+        code: 'E_BAD_SUBCMD',
+        exitCode: 64,
+        hint: `Available: generate, poll, fetch`,
+      })
+  }
+}
+
+async function doGenerate(flags: Record<string, unknown>): Promise<void> {
+  const prompt = getString(flags as Parameters<typeof getString>[0], 'prompt', 'p')
+  if (!prompt) {
+    throw new MorphixError(`--prompt is required.`, { code: 'E_NO_INPUT', exitCode: 64 })
+  }
+  const config = await loadConfig()
+  const resolved = resolve({
+    feature: 'video',
+    flagProvider: getString(flags as Parameters<typeof getString>[0], 'provider'),
+    flagModel: getString(flags as Parameters<typeof getString>[0], 'model'),
+    config,
+  })
+  const { impl } = getCapability('video', resolved.provider, resolved.providerConfig)
+  const { jobId } = await impl.submit(
+    {
+      prompt,
+      durationSec: getNumber(flags as Parameters<typeof getNumber>[0], 'duration'),
+      aspectRatio: getString(flags as Parameters<typeof getString>[0], 'aspect-ratio'),
+    },
+    { model: resolved.model },
+  )
+  if (getBool(flags as Parameters<typeof getBool>[0], 'async')) {
+    console.log(JSON.stringify({ jobId, provider: resolved.provider }))
+    return
+  }
+  // Inline poll loop
+  process.stderr.write(`submitted job ${jobId} — polling…\n`)
+  while (true) {
+    const status = await impl.poll(jobId)
+    process.stderr.write(`  state=${status.state}${status.progress ? ` (${status.progress}%)` : ''}\n`)
+    if (status.state === 'done') break
+    if (status.state === 'error') {
+      throw new MorphixError(`Video job failed: ${status.error ?? 'unknown'}`, {
+        code: 'E_JOB_FAILED',
+        exitCode: 70,
+      })
+    }
+    await new Promise((r) => setTimeout(r, 3000))
+  }
+  const { assets } = await impl.fetch(jobId)
+  for (const a of assets) console.log(a.url ?? '(inline bytes, use --async + mx video fetch)')
+}
+
+async function doPoll(flags: Record<string, unknown>): Promise<void> {
+  const jobId = getString(flags as Parameters<typeof getString>[0], 'job-id', 'task-id')
+  if (!jobId) throw new MorphixError(`--job-id is required.`, { code: 'E_NO_INPUT', exitCode: 64 })
+  const config = await loadConfig()
+  const resolved = resolve({
+    feature: 'video',
+    flagProvider: getString(flags as Parameters<typeof getString>[0], 'provider'),
+    flagModel: getString(flags as Parameters<typeof getString>[0], 'model'),
+    config,
+  })
+  const { impl } = getCapability('video', resolved.provider, resolved.providerConfig)
+  const status = await impl.poll(jobId)
+  console.log(JSON.stringify(status, null, 2))
+}
+
+async function doFetch(flags: Record<string, unknown>): Promise<void> {
+  const jobId = getString(flags as Parameters<typeof getString>[0], 'job-id', 'task-id')
+  if (!jobId) throw new MorphixError(`--job-id is required.`, { code: 'E_NO_INPUT', exitCode: 64 })
+  const config = await loadConfig()
+  const resolved = resolve({
+    feature: 'video',
+    flagProvider: getString(flags as Parameters<typeof getString>[0], 'provider'),
+    flagModel: getString(flags as Parameters<typeof getString>[0], 'model'),
+    config,
+  })
+  const { impl } = getCapability('video', resolved.provider, resolved.providerConfig)
+  const { assets } = await impl.fetch(jobId)
+  for (const a of assets) console.log(a.url ?? '(inline bytes)')
+}
+
+function printHelp(): void {
+  console.log(`Usage: mx video <generate|poll|fetch> [options]
+
+  generate --prompt <text> [--duration <sec>] [--aspect-ratio <a:b>] [--async]
+           Submits a generation job and (by default) polls until done.
+           With --async, prints the jobId and exits immediately.
+
+  poll     --job-id <id>
+           Print job state (pending|running|done|error).
+
+  fetch    --job-id <id>
+           Retrieve assets for a completed job.
+
+  --provider <id>            gemini | comfyui
+  --model <name>             Provider-specific model id.
+`)
 }

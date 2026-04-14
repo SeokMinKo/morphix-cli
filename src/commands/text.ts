@@ -1,11 +1,153 @@
-export async function textCommand(args: string[]): Promise<void> {
-  const subcommand = args[0]
+import { createWriteStream } from 'node:fs'
+import { readFile } from 'node:fs/promises'
+import { parseArgs, getString, getBool, getStrings, getNumber } from '../utils/args.js'
+import { MorphixError } from '../utils/errors.js'
+import { loadConfig } from '../config/file.js'
+import { resolve } from '../config/resolver.js'
+import { registerBuiltins } from '../providers/index.js'
+import { getCapability } from '../providers/registry.js'
+import type { ChatMessage, Role } from '../capabilities/types.js'
 
-  if (!subcommand) {
-    console.log('Usage: morphix text <subcommand> [args]')
-    console.log('Subcommands: encode, decode, count, hash, format')
+export async function textCommand(argv: string[]): Promise<void> {
+  const { command: sub, args: rest, flags } = parseArgs(argv)
+  if (!sub || flags.help) {
+    printHelp()
     return
   }
+  if (sub !== 'chat') {
+    throw new MorphixError(`Unknown 'text' subcommand: '${sub}'`, {
+      code: 'E_BAD_SUBCMD',
+      exitCode: 64,
+      hint: `Available: chat`,
+    })
+  }
+  void rest // reserved — positional args after 'chat' currently unused
 
-  console.log(`[text] ${subcommand} — not yet implemented`)
+  registerBuiltins()
+
+  const config = await loadConfig()
+  const resolved = resolve({
+    feature: 'text',
+    flagProvider: getString(flags, 'provider'),
+    flagModel: getString(flags, 'model'),
+    config,
+  })
+
+  const { impl } = getCapability('text', resolved.provider, resolved.providerConfig)
+
+  const messages = await loadMessages(flags)
+  if (messages.length === 0) {
+    throw new MorphixError(`No input messages.`, {
+      code: 'E_NO_INPUT',
+      exitCode: 64,
+      hint: `Pass --message "text", repeat --message, or --messages-file path.json`,
+    })
+  }
+
+  const system = getString(flags, 'system')
+  const stream = !getBool(flags, 'no-stream')
+  const temperature = getNumber(flags, 'temperature')
+  const maxTokens = getNumber(flags, 'max-tokens')
+  const outputPath = getString(flags, 'output', 'out')
+  const format = getString(flags, 'format') ?? 'text'
+
+  const out = outputPath ? createWriteStream(outputPath) : process.stdout
+
+  let full = ''
+  const iter = impl.chat(
+    { messages, system },
+    { model: resolved.model, stream, temperature, maxTokens },
+  )
+  for await (const chunk of iter) {
+    if (chunk.text) {
+      if (format === 'text') {
+        out.write(chunk.text)
+      }
+      full += chunk.text
+    }
+    if (chunk.done && format === 'json') {
+      out.write(
+        JSON.stringify(
+          {
+            provider: resolved.provider,
+            model: resolved.model,
+            text: full,
+            usage: chunk.usage,
+          },
+          null,
+          2,
+        ) + '\n',
+      )
+    }
+  }
+  if (format === 'text') out.write('\n')
+}
+
+async function loadMessages(flags: Record<string, unknown>): Promise<ChatMessage[]> {
+  const messagesFile = getString(flags as Parameters<typeof getString>[0], 'messages-file')
+  if (messagesFile) {
+    const raw =
+      messagesFile === '-'
+        ? await readStdin()
+        : await readFile(messagesFile, 'utf8')
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) {
+      throw new MorphixError(`--messages-file must contain a JSON array of {role, content}`, {
+        code: 'E_BAD_INPUT',
+        exitCode: 64,
+      })
+    }
+    return parsed.map((m): ChatMessage => {
+      const rec = m as { role?: string; content?: string }
+      return {
+        role: (rec.role ?? 'user') as Role,
+        content: rec.content ?? '',
+      }
+    })
+  }
+
+  const raw = getStrings(flags as Parameters<typeof getStrings>[0], 'message', 'm')
+  const out: ChatMessage[] = []
+  for (const item of raw) {
+    const match = item.match(/^(system|user|assistant):(.*)$/s)
+    if (match) {
+      out.push({ role: match[1] as Role, content: match[2] })
+    } else {
+      out.push({ role: 'user', content: item })
+    }
+  }
+  return out
+}
+
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = []
+  for await (const chunk of process.stdin) {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+  }
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+function printHelp(): void {
+  console.log(`Usage: mx text chat [options]
+
+  --message, -m <text>       User message. Can be repeated for multi-turn.
+                             Prefix with 'system:', 'user:', or 'assistant:'
+                             to set role (default: user).
+  --messages-file <path>     Read a JSON array of {role, content} messages.
+                             Use '-' for stdin.
+  --system <text>            System prompt.
+  --provider <id>            anthropic | openai | gemini | ollama
+  --model <name>             Provider-specific model id.
+  --no-stream                Disable streaming; wait for the full response.
+  --temperature <n>          Sampling temperature.
+  --max-tokens <n>           Maximum output tokens.
+  --output, --out <path>     Write to file instead of stdout.
+  --format <text|json>       Output format. Default: text.
+
+Examples:
+  mx text chat -m "Write a haiku"
+  mx text chat --provider openai --model gpt-4o-mini -m "hello"
+  mx text chat --provider ollama --model llama3.2 -m "hi"
+  cat convo.json | mx text chat --messages-file -
+`)
 }

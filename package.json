@@ -1,0 +1,38 @@
+{
+  "name": "morphix-cli",
+  "version": "0.1.0",
+  "description": "All-in-one multimedia CLI — text, image, video, audio processing in a single tool",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "morphix": "dist/index.js",
+    "mx": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "cli",
+    "multimedia",
+    "text",
+    "image",
+    "video",
+    "audio",
+    "converter"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.4"
+  }
+}

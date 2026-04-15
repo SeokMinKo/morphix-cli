@@ -16,6 +16,22 @@ export class MorphixError extends Error {
     this.exitCode = opts.exitCode ?? 1
     this.code = opts.code ?? 'E_MORPHIX'
   }
+
+  /**
+   * Serialize to a stable JSON shape used by the --json envelope. Fields are
+   * passed through redact() so any key-shaped substring in the message or
+   * hint is masked before hitting the wire.
+   */
+  toJSON(): { code: string; message: string; hint?: string; exitCode: number; httpStatus?: number } {
+    const status = (this as unknown as { status?: number }).status
+    return {
+      code: this.code,
+      message: redact(this.message),
+      ...(this.hint ? { hint: redact(this.hint) } : {}),
+      exitCode: this.exitCode,
+      ...(typeof status === 'number' ? { httpStatus: status } : {}),
+    }
+  }
 }
 
 export class MissingProviderError extends MorphixError {
@@ -114,3 +130,42 @@ export function redact(s: string): string {
   }
   return out
 }
+
+/**
+ * Catalog of every error code the CLI can emit. Surfaced via `mx schema` so
+ * agents can reason about error semantics without grepping the source.
+ *
+ * When adding a new `throw new MorphixError({code:'E_...'})` anywhere,
+ * register the code here too.
+ */
+export interface ErrorCodeSpec {
+  code: string
+  exitCode: number
+  description: string
+}
+
+export const ERROR_CODES: ErrorCodeSpec[] = [
+  { code: 'E_MORPHIX', exitCode: 1, description: 'Generic Morphix error.' },
+  { code: 'E_INTERNAL', exitCode: 1, description: 'Unexpected internal error.' },
+  { code: 'E_NO_PROVIDER', exitCode: 64, description: 'No provider resolved for feature.' },
+  { code: 'E_NO_MODEL', exitCode: 64, description: 'No model resolved for provider/feature.' },
+  { code: 'E_NO_CREDENTIAL', exitCode: 64, description: 'Provider credential missing.' },
+  { code: 'E_UNSUPPORTED', exitCode: 64, description: 'Provider does not support capability.' },
+  { code: 'E_PROVIDER_HTTP', exitCode: 70, description: 'Upstream provider returned HTTP error (>=500 ⇒ exit 75).' },
+  { code: 'E_BAD_SUBCMD', exitCode: 64, description: 'Unknown subcommand.' },
+  { code: 'E_BAD_ARGS', exitCode: 64, description: 'Malformed or missing required arguments.' },
+  { code: 'E_BAD_PROVIDER', exitCode: 64, description: 'Provider id is not recognized.' },
+  { code: 'E_BAD_INPUT', exitCode: 64, description: 'Input file or payload is invalid.' },
+  { code: 'E_NO_INPUT', exitCode: 64, description: 'Required input (prompt, file) missing.' },
+  { code: 'E_NOT_FOUND', exitCode: 70, description: 'Requested resource (job, file) not found.' },
+  { code: 'E_NO_WORKFLOW', exitCode: 64, description: 'ComfyUI workflow not configured.' },
+  { code: 'E_BAD_WORKFLOW', exitCode: 64, description: 'ComfyUI workflow JSON failed to parse.' },
+  { code: 'E_COMFY_FAILED', exitCode: 70, description: 'ComfyUI reported job failure.' },
+  { code: 'E_COMFY_TIMEOUT', exitCode: 75, description: 'ComfyUI job polling timeout.' },
+  { code: 'E_JOB_FAILED', exitCode: 70, description: 'Async job (video, music) failed.' },
+  { code: 'E_ABORT', exitCode: 130, description: 'Operation aborted by signal.' },
+  { code: 'E_INTERACTIVE_REQUIRED', exitCode: 64, description: 'Command needs a TTY or --api-key/--endpoint to run.' },
+  { code: 'E_STREAM_REQUIRES_OUT', exitCode: 64, description: 'Binary stream mode incompatible with --json envelope.' },
+  { code: 'E_UPDATE_FAILED', exitCode: 70, description: 'Global package update failed.' },
+  { code: 'E_QUOTA_UNAVAILABLE', exitCode: 0, description: 'Quota endpoint not available for this provider.' },
+]

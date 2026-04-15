@@ -6,9 +6,44 @@ import { loadConfig } from '../config/file.js'
 import { resolve } from '../config/resolver.js'
 import { registerBuiltins } from '../providers/index.js'
 import { getCapability } from '../providers/registry.js'
-import type { ChatMessage, Role } from '../capabilities/types.js'
+import type { ChatMessage, Role, Usage } from '../capabilities/types.js'
+import type { RunContext } from '../utils/envelope.js'
+import { emitResult } from '../utils/envelope.js'
+import { CommandSpec, PROVIDER_FLAG, MODEL_FLAG } from './spec.js'
 
-export async function textCommand(argv: string[]): Promise<void> {
+export const spec: CommandSpec = {
+  name: 'text',
+  summary: 'Chat / text generation.',
+  capability: 'text',
+  subcommands: [
+    {
+      name: 'chat',
+      summary: 'Run a chat completion (streaming by default).',
+      flags: [
+        { name: 'message', alias: 'm', type: 'repeated-string', repeatable: true, description: 'User message; repeatable for multi-turn. Prefix with role:' },
+        { name: 'messages-file', type: 'path', description: 'JSON array of {role, content}. Use "-" for stdin.' },
+        { name: 'system', type: 'string', description: 'System prompt.' },
+        { name: 'no-stream', type: 'boolean', description: 'Disable streaming.' },
+        { name: 'temperature', type: 'number', description: 'Sampling temperature.' },
+        { name: 'max-tokens', type: 'number', description: 'Max output tokens.' },
+        { name: 'output', alias: 'out', type: 'path', description: 'Write to file instead of stdout.' },
+        { name: 'format', type: 'string', enum: ['text', 'json'], description: 'Per-command output format (distinct from global --json).' },
+        PROVIDER_FLAG,
+        MODEL_FLAG,
+      ],
+      outputs: [
+        { kind: 'text', description: 'Streaming assistant text on stdout.' },
+        { kind: 'json', description: 'With --json: { text, usage, provider, model }.' },
+      ],
+      examples: [
+        'mx text chat -m "Write a haiku"',
+        'mx text chat --provider openai --model gpt-4o-mini -m "hello"',
+      ],
+    },
+  ],
+}
+
+export async function textCommand(argv: string[], ctx: RunContext): Promise<void> {
   const { command: sub, args: rest, flags } = parseArgs(argv)
   if (!sub || flags.help) {
     printHelp()
@@ -21,7 +56,7 @@ export async function textCommand(argv: string[]): Promise<void> {
       hint: `Available: chat`,
     })
   }
-  void rest // reserved — positional args after 'chat' currently unused
+  void rest
 
   registerBuiltins()
 
@@ -51,21 +86,24 @@ export async function textCommand(argv: string[]): Promise<void> {
   const outputPath = getString(flags, 'output', 'out')
   const format = getString(flags, 'format') ?? 'text'
 
+  // In JSON envelope mode we never print the stream live — we collect and
+  // emit one envelope at the end. This keeps stdout a single JSON line.
+  const liveStream = !ctx.json && !outputPath && format === 'text'
   const out = outputPath ? createWriteStream(outputPath) : process.stdout
 
   let full = ''
+  let lastUsage: Usage | undefined
   const iter = impl.chat(
     { messages, system },
     { model: resolved.model, stream, temperature, maxTokens },
   )
   for await (const chunk of iter) {
     if (chunk.text) {
-      if (format === 'text') {
-        out.write(chunk.text)
-      }
+      if (liveStream) out.write(chunk.text)
       full += chunk.text
     }
-    if (chunk.done && format === 'json') {
+    if (chunk.usage) lastUsage = chunk.usage
+    if (chunk.done && format === 'json' && !ctx.json) {
       out.write(
         JSON.stringify(
           {
@@ -80,7 +118,19 @@ export async function textCommand(argv: string[]): Promise<void> {
       )
     }
   }
-  if (format === 'text') out.write('\n')
+  if (liveStream) out.write('\n')
+
+  if (ctx.json) {
+    emitResult(
+      ctx,
+      'text.chat',
+      { text: full },
+      { usage: lastUsage, meta: { provider: resolved.provider, model: resolved.model } },
+    )
+  } else if (outputPath && format === 'text') {
+    // Write the collected text to file for the non-live file-output case.
+    out.write(full + '\n')
+  }
 }
 
 async function loadMessages(flags: Record<string, unknown>): Promise<ChatMessage[]> {
@@ -143,6 +193,7 @@ function printHelp(): void {
   --max-tokens <n>           Maximum output tokens.
   --output, --out <path>     Write to file instead of stdout.
   --format <text|json>       Output format. Default: text.
+                             (For the global AI envelope use --json.)
 
 Examples:
   mx text chat -m "Write a haiku"

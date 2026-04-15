@@ -5,8 +5,32 @@ import { resolve } from '../config/resolver.js'
 import { registerBuiltins } from '../providers/index.js'
 import { getCapability } from '../providers/registry.js'
 import type { ImageRef } from '../capabilities/types.js'
+import { emitResult, type RunContext } from '../utils/envelope.js'
+import { CommandSpec, PROVIDER_FLAG, MODEL_FLAG } from './spec.js'
 
-export async function visionCommand(argv: string[]): Promise<void> {
+export const spec: CommandSpec = {
+  name: 'vision',
+  summary: 'Image understanding (VLM).',
+  capability: 'vision',
+  subcommands: [
+    {
+      name: 'describe',
+      summary: 'Describe or answer a question about an image.',
+      flags: [
+        { name: 'image', alias: 'i', type: 'string', required: true, description: 'Local file or URL.' },
+        { name: 'prompt', alias: 'p', type: 'string', description: 'Optional question/instruction.' },
+        PROVIDER_FLAG,
+        MODEL_FLAG,
+      ],
+      outputs: [
+        { kind: 'text', description: 'Natural-language description on stdout.' },
+        { kind: 'json', description: '{ text, usage?, provider, model }' },
+      ],
+    },
+  ],
+}
+
+export async function visionCommand(argv: string[], ctx: RunContext): Promise<void> {
   const { command: sub, flags } = parseArgs(argv)
   if (flags.help) {
     printHelp()
@@ -48,7 +72,11 @@ export async function visionCommand(argv: string[]): Promise<void> {
     { image, prompt: getString(flags, 'prompt', 'p') },
     { model: resolved.model },
   )
-  process.stdout.write(result.text + '\n')
+  if (ctx.json) {
+    emitResult(ctx, 'vision.describe', { text: result.text }, { usage: result.usage, meta: { provider: resolved.provider, model: resolved.model } })
+  } else {
+    process.stdout.write(result.text + '\n')
+  }
 }
 
 function printHelp(): void {

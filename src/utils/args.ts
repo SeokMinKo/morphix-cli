@@ -155,6 +155,57 @@ export function getStrings(
   return out
 }
 
+/**
+ * Strip a set of global flags out of argv so individual command handlers
+ * don't see them. Returns the cleaned argv and a map of the extracted values.
+ *
+ * Recognized forms: `--flag`, `--flag=value`, `--flag value` (value is
+ * consumed only if value-shaped flag name passed in `withValue`). The
+ * default here is boolean-only — extraction for our global flags.
+ */
+export function stripFlags(
+  argv: string[],
+  booleanFlags: readonly string[],
+  stringFlags: readonly string[] = [],
+): { argv: string[]; extracted: Record<string, string | boolean | undefined> } {
+  const extracted: Record<string, string | boolean | undefined> = {}
+  const rest: string[] = []
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (!a.startsWith('--')) {
+      rest.push(a)
+      continue
+    }
+    const eq = a.indexOf('=')
+    const name = eq >= 0 ? a.slice(2, eq) : a.slice(2)
+    if (booleanFlags.includes(name)) {
+      if (eq >= 0) {
+        const v = a.slice(eq + 1)
+        extracted[name] = v !== 'false' && v !== '0' && v !== 'no'
+      } else {
+        extracted[name] = true
+      }
+      continue
+    }
+    if (stringFlags.includes(name)) {
+      if (eq >= 0) {
+        extracted[name] = a.slice(eq + 1)
+      } else {
+        const next = argv[i + 1]
+        if (next !== undefined && !next.startsWith('-')) {
+          extracted[name] = next
+          i++
+        } else {
+          extracted[name] = ''
+        }
+      }
+      continue
+    }
+    rest.push(a)
+  }
+  return { argv: rest, extracted }
+}
+
 /** Parse a flag as integer. Returns fallback if missing/NaN. */
 export function getNumber(
   flags: Record<string, FlagValue | FlagValue[]>,

@@ -76,6 +76,58 @@ export class ComfyClient {
     return all[promptId]
   }
 
+  /**
+   * Upload a local file to ComfyUI's input directory. Returns the server-
+   * stored {name, subfolder, type} which can then be referenced by name from
+   * a workflow node (e.g. LoadAudio, LoadImage). ComfyUI's `/upload/image`
+   * endpoint accepts arbitrary file types despite the misleading name.
+   */
+  async upload(filePath: string, opts: { subfolder?: string; type?: string; overwrite?: boolean } = {}): Promise<{
+    name: string
+    subfolder: string
+    type: string
+  }> {
+    const { readFile } = await import('node:fs/promises')
+    const { basename } = await import('node:path')
+    const bytes = await readFile(filePath)
+    const filename = basename(filePath)
+    const mime = guessMime(filename)
+
+    const boundary = `----morphix-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`
+    const enc = new TextEncoder()
+    const parts: Uint8Array[] = []
+    const push = (s: string) => parts.push(enc.encode(s))
+    const field = (name: string, value: string) => {
+      push(`--${boundary}\r\n`)
+      push(`Content-Disposition: form-data; name="${name}"\r\n\r\n`)
+      push(`${value}\r\n`)
+    }
+    field('type', opts.type ?? 'input')
+    if (opts.subfolder) field('subfolder', opts.subfolder)
+    field('overwrite', opts.overwrite === false ? 'false' : 'true')
+    push(`--${boundary}\r\n`)
+    push(`Content-Disposition: form-data; name="image"; filename="${filename}"\r\n`)
+    push(`Content-Type: ${mime}\r\n\r\n`)
+    parts.push(new Uint8Array(bytes))
+    push(`\r\n--${boundary}--\r\n`)
+
+    const total = parts.reduce((s, p) => s + p.byteLength, 0)
+    const body = new Uint8Array(total)
+    let off = 0
+    for (const p of parts) {
+      body.set(p, off)
+      off += p.byteLength
+    }
+
+    const res = await httpRequest({
+      provider: 'comfyui',
+      url: `${this.endpoint}/upload/image`,
+      headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+      body,
+    })
+    return (await res.json()) as { name: string; subfolder: string; type: string }
+  }
+
   /** Download an output file as raw bytes. */
   async view(file: ComfyOutputFile): Promise<Uint8Array> {
     const params = new URLSearchParams({
@@ -149,6 +201,25 @@ export function substituteWorkflow(
     const v = vars[name]
     return v === undefined ? match : String(v)
   })
+}
+
+function guessMime(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? ''
+  const map: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    webp: 'image/webp',
+    gif: 'image/gif',
+    mp3: 'audio/mpeg',
+    wav: 'audio/wav',
+    flac: 'audio/flac',
+    ogg: 'audio/ogg',
+    m4a: 'audio/mp4',
+    mp4: 'video/mp4',
+    webm: 'video/webm',
+  }
+  return map[ext] ?? 'application/octet-stream'
 }
 
 /** Load a workflow JSON file, substitute placeholders, and parse it. */

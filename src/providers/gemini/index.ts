@@ -314,7 +314,8 @@ export function createGeminiProvider(cfg: ProviderConfig): Provider {
     },
     async poll(jobId: string): Promise<JobStatus> {
       // Operation names look like "models/veo-3.0-generate-001/operations/abcd".
-      const path = jobId.startsWith('operations/') ? jobId : jobId
+      // Accept either the bare name or a leading-slash variant.
+      const path = jobId.replace(/^\/+/, '')
       const json = (await httpJson({
         provider: 'gemini',
         url: keyed(`${endpoint}/v1beta/${path}`),
@@ -331,7 +332,7 @@ export function createGeminiProvider(cfg: ProviderConfig): Provider {
       return { jobId, state: 'done' }
     },
     async fetch(jobId: string) {
-      const path = jobId.startsWith('operations/') ? jobId : jobId
+      const path = jobId.replace(/^\/+/, '')
       const json = (await httpJson({
         provider: 'gemini',
         url: keyed(`${endpoint}/v1beta/${path}`),

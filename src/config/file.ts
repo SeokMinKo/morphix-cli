@@ -9,33 +9,36 @@ export function configPath(): string {
 }
 
 /**
- * Load config from disk, falling back to DEFAULT_CONFIG if the file is
- * missing or malformed. Returns a fresh copy — safe to mutate.
+ * Load the raw (un-merged) config from disk. Returns an empty object if the
+ * file doesn't exist or is malformed. Used by `saveConfig` callers that want
+ * to persist only user-provided values, not baked-in defaults.
  */
-export async function loadConfig(): Promise<MorphixConfig> {
+export async function loadRawConfig(): Promise<Partial<MorphixConfig>> {
   const path = configPath()
   try {
     const raw = await readFile(path, 'utf8')
     const parsed = JSON.parse(raw) as Partial<MorphixConfig>
-    return mergeWithDefaults(parsed)
+    return parsed && typeof parsed === 'object' ? parsed : {}
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      return structuredClone(DEFAULT_CONFIG)
-    }
-    // Malformed JSON: fall back to defaults rather than crash. The user can
-    // inspect with `mx config path` and fix manually.
-    if (err instanceof SyntaxError) {
-      return structuredClone(DEFAULT_CONFIG)
-    }
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {}
+    if (err instanceof SyntaxError) return {}
     throw err
   }
+}
+
+/**
+ * Load config from disk, falling back to DEFAULT_CONFIG if the file is
+ * missing or malformed. Returns a fresh copy — safe to mutate.
+ */
+export async function loadConfig(): Promise<MorphixConfig> {
+  return mergeWithDefaults(await loadRawConfig())
 }
 
 /**
  * Persist config to disk with tight permissions (dir 0700, file 0600) so
  * any credentials stored inside are not world-readable.
  */
-export async function saveConfig(config: MorphixConfig): Promise<string> {
+export async function saveConfig(config: Partial<MorphixConfig>): Promise<string> {
   const path = configPath()
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })
   const json = JSON.stringify(config, null, 2) + '\n'
@@ -59,10 +62,20 @@ function mergeWithDefaults(partial: Partial<MorphixConfig>): MorphixConfig {
     base.defaults = { ...base.defaults, ...partial.defaults }
   }
   if (partial.providers) {
-    // Do not inherit defaults for providers — user-configured providers should
-    // replace, not merge with, built-in endpoint defaults. But for known local
-    // providers we still want the endpoint fallback if the user omitted it.
-    base.providers = { ...base.providers, ...partial.providers }
+    // Per-provider shallow merge so that e.g. `providers.ollama.apiKey` set by
+    // the user does not drop the built-in endpoint fallback. `extra` is merged
+    // key-by-key for the same reason.
+    const merged: MorphixConfig['providers'] = { ...base.providers }
+    for (const [id, cfg] of Object.entries(partial.providers)) {
+      if (!cfg) continue
+      const existing = merged[id] ?? {}
+      merged[id] = {
+        ...existing,
+        ...cfg,
+        extra: { ...(existing.extra ?? {}), ...(cfg.extra ?? {}) },
+      }
+    }
+    base.providers = merged
   }
   return base
 }
@@ -75,7 +88,7 @@ function mergeWithDefaults(partial: Partial<MorphixConfig>): MorphixConfig {
  *   - `providers.ollama.endpoint`
  *   - `outputDir`
  */
-export function setByPath(config: MorphixConfig, path: string, value: string): void {
+export function setByPath(config: Partial<MorphixConfig>, path: string, value: string): void {
   const parts = path.split('.')
   if (parts.length === 0) throw new Error(`Empty config key`)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

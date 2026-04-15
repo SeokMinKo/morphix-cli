@@ -1,4 +1,5 @@
 import { createWriteStream } from 'node:fs'
+import { once } from 'node:events'
 import { parseArgs, getString, getNumber } from '../utils/args.js'
 import { MorphixError } from '../utils/errors.js'
 import { loadConfig } from '../config/file.js'
@@ -57,8 +58,11 @@ export async function speechCommand(argv: string[]): Promise<void> {
     { model: resolved.model, format },
   )
   const ws = createWriteStream(outPath)
-  for await (const chunk of stream) ws.write(chunk)
+  for await (const chunk of stream) {
+    if (!ws.write(chunk)) await once(ws, 'drain')
+  }
   ws.end()
+  await once(ws, 'finish')
   console.log(outPath)
 }
 

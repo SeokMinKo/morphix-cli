@@ -67,10 +67,16 @@ export function createOpenAiProvider(cfg: ProviderConfig): Provider {
         signal: opts.signal,
       })
 
+      // OpenAI streams a final usage-only chunk AFTER the finish_reason
+      // chunk when stream_options.include_usage is set. If we emitted `done`
+      // on finish_reason we'd lose the usage numbers — instead, flag that
+      // the stream is closing and emit one done chunk at the very end.
       let inputTokens: number | undefined
       let outputTokens: number | undefined
+      let finished = false
       for await (const ev of iterSse(res.body)) {
-        if (!ev.data || ev.data === '[DONE]') continue
+        if (!ev.data) continue
+        if (ev.data === '[DONE]') break
         let parsed: OpenAiDelta
         try {
           parsed = JSON.parse(ev.data) as OpenAiDelta
@@ -84,14 +90,17 @@ export function createOpenAiProvider(cfg: ProviderConfig): Provider {
           outputTokens = parsed.usage.completion_tokens
         }
         if (parsed.choices?.[0]?.finish_reason) {
-          yield {
-            text: '',
-            done: true,
-            usage:
-              inputTokens !== undefined || outputTokens !== undefined
-                ? { inputTokens, outputTokens }
-                : undefined,
-          }
+          finished = true
+        }
+      }
+      if (finished || inputTokens !== undefined || outputTokens !== undefined) {
+        yield {
+          text: '',
+          done: true,
+          usage:
+            inputTokens !== undefined || outputTokens !== undefined
+              ? { inputTokens, outputTokens }
+              : undefined,
         }
       }
     },

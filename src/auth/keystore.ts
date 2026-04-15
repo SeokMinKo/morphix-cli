@@ -1,29 +1,34 @@
-import { loadConfig, saveConfig } from '../config/file.js'
+import { loadRawConfig, saveConfig } from '../config/file.js'
 import type { ProviderConfig } from '../config/schema.js'
 
 /**
  * Persist a credential (apiKey or endpoint) for a provider in the config
  * file. File permissions are enforced by saveConfig (dir 0700, file 0600).
+ *
+ * Only the raw (user-specified) on-disk config is mutated so that built-in
+ * defaults remain fluid across upgrades.
  */
 export async function saveCredential(
   provider: string,
   cred: ProviderConfig,
 ): Promise<string> {
-  const config = await loadConfig()
-  const existing = config.providers[provider] ?? {}
-  config.providers[provider] = {
+  const raw = await loadRawConfig()
+  const providers = { ...(raw.providers ?? {}) }
+  const existing = providers[provider] ?? {}
+  providers[provider] = {
     ...existing,
     ...cred,
     extra: { ...(existing.extra ?? {}), ...(cred.extra ?? {}) },
   }
-  return saveConfig(config)
+  raw.providers = providers
+  return saveConfig(raw)
 }
 
 /** Remove a provider's credentials from the config file. */
 export async function removeCredential(provider: string): Promise<string> {
-  const config = await loadConfig()
-  delete config.providers[provider]
-  return saveConfig(config)
+  const raw = await loadRawConfig()
+  if (raw.providers) delete raw.providers[provider]
+  return saveConfig(raw)
 }
 
 /**

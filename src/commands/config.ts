@@ -1,6 +1,6 @@
 import { parseArgs, getString } from '../utils/args.js'
 import { MorphixError } from '../utils/errors.js'
-import { configPath, loadConfig, saveConfig, setByPath } from '../config/file.js'
+import { configPath, loadConfig, loadRawConfig, saveConfig, setByPath } from '../config/file.js'
 import { maskSecret } from '../auth/keystore.js'
 
 export async function configCommand(argv: string[]): Promise<void> {
@@ -53,9 +53,13 @@ async function doSet(flags: Record<string, unknown>): Promise<void> {
         `  mx config set --key providers.ollama.endpoint --value http://localhost:11434`,
     })
   }
-  const config = await loadConfig()
-  setByPath(config, key, value)
-  const path = await saveConfig(config)
+  // Mutate the raw on-disk config (NOT the merged-with-defaults one) so that
+  // we persist only user-specified values. Saving the merged config would
+  // bake the current CLI defaults into the file and prevent future upgrades
+  // from changing them.
+  const raw = await loadRawConfig()
+  setByPath(raw, key, value)
+  const path = await saveConfig(raw)
   console.log(`Set ${key} = ${key.includes('apiKey') ? '(hidden)' : value}`)
   console.log(`  in ${path}`)
 }

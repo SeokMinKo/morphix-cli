@@ -32,7 +32,9 @@ const commands: Record<string, CommandHandler> = {
 async function main(): Promise<void> {
   const { command, args, flags } = parseArgs(process.argv.slice(2))
 
-  if (flags.version) {
+  // Top-level --version fires only when no subcommand is invoked. Otherwise
+  // -v / --version is passed through to the subcommand (mirrors --help).
+  if (flags.version && !command) {
     console.log('morphix-cli v0.1.0')
     return
   }

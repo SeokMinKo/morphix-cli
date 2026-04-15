@@ -15,7 +15,15 @@ export const CAPABILITIES = [
 ] as const
 export type Capability = (typeof CAPABILITIES)[number]
 
-export const PROVIDER_IDS = ['anthropic', 'openai', 'gemini', 'ollama', 'comfyui'] as const
+export const PROVIDER_IDS = [
+  'anthropic',
+  'openai',
+  'gemini',
+  'ollama',
+  'comfyui',
+  'piapi',
+  'typecast',
+] as const
 export type ProviderId = (typeof PROVIDER_IDS)[number]
 
 export interface FeatureDefault {
@@ -50,6 +58,8 @@ export const DEFAULT_CONFIG: MorphixConfig = {
   providers: {
     ollama: { endpoint: 'http://localhost:11434' },
     comfyui: { endpoint: 'http://localhost:8188' },
+    piapi: { endpoint: 'https://api.piapi.ai' },
+    typecast: { endpoint: 'https://typecast.ai' },
   },
   outputDir: '~/morphix-out',
 }
@@ -92,11 +102,25 @@ export const PROVIDER_DEFAULT_MODELS: Record<ProviderId, Partial<Record<Capabili
     video: 'ace-step',
     music: 'ace-step',
   },
+  piapi: {
+    image: 'Qubico/flux1-schnell',
+    video: 'kling',
+    music: 'music-u',
+  },
+  typecast: {
+    speech: '',
+  },
 }
 
 /** Whether a provider requires an API key (vs only an endpoint). */
 export function needsApiKey(provider: string): boolean {
-  return provider === 'anthropic' || provider === 'openai' || provider === 'gemini'
+  return (
+    provider === 'anthropic' ||
+    provider === 'openai' ||
+    provider === 'gemini' ||
+    provider === 'piapi' ||
+    provider === 'typecast'
+  )
 }
 
 /** Native env var name for a provider's API key, used for error hints. */
@@ -108,6 +132,10 @@ export function apiKeyEnvName(provider: string): string {
       return 'OPENAI_API_KEY'
     case 'gemini':
       return 'GEMINI_API_KEY'
+    case 'piapi':
+      return 'PIAPI_API_KEY'
+    case 'typecast':
+      return 'TYPECAST_API_KEY'
     default:
       return `${provider.toUpperCase()}_API_KEY`
   }

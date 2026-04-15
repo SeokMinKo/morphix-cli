@@ -130,6 +130,18 @@ async function fetchUsage(
     case 'ollama':
     case 'comfyui':
       return await localPing(id, endpoint)
+    case 'piapi':
+      return {
+        supported: false,
+        reason: 'no_api',
+        hint: 'PiAPI credits dashboard: https://piapi.ai/workspace',
+      }
+    case 'typecast':
+      return {
+        supported: false,
+        reason: 'no_api',
+        hint: 'Typecast usage dashboard: https://app.typecast.ai/',
+      }
   }
 }
 

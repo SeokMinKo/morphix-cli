@@ -41,7 +41,7 @@ export const PROVIDER_FLAG: FlagSpec = {
   name: 'provider',
   type: 'string',
   description: 'Provider id override. Precedence: flag > env > config.',
-  enum: ['anthropic', 'openai', 'gemini', 'ollama', 'comfyui'],
+  enum: ['anthropic', 'openai', 'gemini', 'ollama', 'comfyui', 'piapi', 'typecast'],
 }
 
 export const MODEL_FLAG: FlagSpec = {

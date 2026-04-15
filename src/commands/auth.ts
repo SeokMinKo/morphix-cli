@@ -16,7 +16,7 @@ export const spec: CommandSpec = {
       name: 'login',
       summary: 'Save credentials for a provider.',
       flags: [
-        { name: 'provider', type: 'string', required: true, enum: ['anthropic', 'openai', 'gemini', 'ollama', 'comfyui'], description: 'Provider id.' },
+        { name: 'provider', type: 'string', required: true, enum: ['anthropic', 'openai', 'gemini', 'ollama', 'comfyui', 'piapi', 'typecast'], description: 'Provider id.' },
         { name: 'api-key', type: 'string', description: 'API key (or "-" to read from stdin).' },
         { name: 'endpoint', type: 'string', description: 'Endpoint URL (for endpoint-only providers).' },
       ],

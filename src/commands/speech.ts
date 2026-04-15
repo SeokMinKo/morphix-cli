@@ -47,18 +47,25 @@ export async function speechCommand(argv: string[]): Promise<void> {
   })
   const { impl } = getCapability('speech', resolved.provider, resolved.providerConfig)
 
+  const format = inferFormat(outPath)
   const stream = impl.synthesize(
     {
       text,
       voice: getString(flags, 'voice'),
       speed: getNumber(flags, 'speed'),
     },
-    { model: resolved.model },
+    { model: resolved.model, format },
   )
   const ws = createWriteStream(outPath)
   for await (const chunk of stream) ws.write(chunk)
   ws.end()
   console.log(outPath)
+}
+
+function inferFormat(path: string): 'mp3' | 'wav' | 'opus' | undefined {
+  const ext = path.split('.').pop()?.toLowerCase()
+  if (ext === 'mp3' || ext === 'wav' || ext === 'opus') return ext
+  return undefined
 }
 
 async function doVoices(flags: Record<string, unknown>): Promise<void> {

@@ -8,6 +8,7 @@ import { createAnthropicProvider } from './anthropic/index.js'
 import { createOllamaProvider } from './ollama/index.js'
 import { createOpenAiProvider } from './openai/index.js'
 import { createGeminiProvider } from './gemini/index.js'
+import { createComfyuiProvider } from './comfyui/index.js'
 
 let registered = false
 
@@ -18,4 +19,5 @@ export function registerBuiltins(): void {
   registerProvider('openai', createOpenAiProvider)
   registerProvider('gemini', createGeminiProvider)
   registerProvider('ollama', createOllamaProvider)
+  registerProvider('comfyui', createComfyuiProvider)
 }

@@ -32,8 +32,13 @@ export function providerConfigFromEnv(provider: string, env: Env = process.env):
       })
     case 'ollama':
       return pick({ endpoint: env.OLLAMA_HOST })
-    case 'comfyui':
-      return pick({ endpoint: env.COMFYUI_HOST })
+    case 'comfyui': {
+      const cfg: ProviderConfig = pick({ endpoint: env.COMFYUI_HOST })
+      if (env.COMFYUI_WORKFLOW) {
+        cfg.extra = { ...(cfg.extra ?? {}), workflow: env.COMFYUI_WORKFLOW }
+      }
+      return cfg
+    }
     default:
       return {}
   }

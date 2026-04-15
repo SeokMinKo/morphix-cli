@@ -5,9 +5,9 @@ import { registerBuiltins } from './index.js'
 describe('registry after registerBuiltins', () => {
   registerBuiltins()
 
-  it('lists all five built-in providers', () => {
+  it('lists all built-in providers', () => {
     expect(registeredIds().sort()).toEqual(
-      ['anthropic', 'comfyui', 'gemini', 'ollama', 'openai'],
+      ['anthropic', 'comfyui', 'gemini', 'ollama', 'openai', 'piapi', 'typecast'],
     )
   })
 
@@ -16,19 +16,19 @@ describe('registry after registerBuiltins', () => {
   })
 
   it('reports correct providers for image', () => {
-    expect(listProvidersFor('image').sort()).toEqual(['comfyui', 'gemini', 'openai'])
+    expect(listProvidersFor('image').sort()).toEqual(['comfyui', 'gemini', 'openai', 'piapi'])
   })
 
   it('reports correct providers for video', () => {
-    expect(listProvidersFor('video').sort()).toEqual(['comfyui', 'gemini'])
+    expect(listProvidersFor('video').sort()).toEqual(['comfyui', 'gemini', 'piapi'])
   })
 
   it('reports correct providers for speech', () => {
-    expect(listProvidersFor('speech').sort()).toEqual(['gemini', 'openai'])
+    expect(listProvidersFor('speech').sort()).toEqual(['gemini', 'openai', 'typecast'])
   })
 
   it('reports correct providers for music', () => {
-    expect(listProvidersFor('music').sort()).toEqual(['comfyui'])
+    expect(listProvidersFor('music').sort()).toEqual(['comfyui', 'piapi'])
   })
 
   it('reports correct providers for vision', () => {

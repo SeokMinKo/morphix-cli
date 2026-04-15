@@ -39,6 +39,26 @@ export function providerConfigFromEnv(provider: string, env: Env = process.env):
       }
       return cfg
     }
+    case 'piapi': {
+      const cfg: ProviderConfig = pick({
+        apiKey: env.PIAPI_API_KEY,
+        endpoint: env.PIAPI_ENDPOINT,
+      })
+      if (env.PIAPI_TASK_TYPE) {
+        cfg.extra = { ...(cfg.extra ?? {}), taskType: env.PIAPI_TASK_TYPE }
+      }
+      return cfg
+    }
+    case 'typecast': {
+      const cfg: ProviderConfig = pick({
+        apiKey: env.TYPECAST_API_KEY,
+        endpoint: env.TYPECAST_ENDPOINT,
+      })
+      if (env.TYPECAST_ACTOR_ID) {
+        cfg.extra = { ...(cfg.extra ?? {}), actorId: env.TYPECAST_ACTOR_ID }
+      }
+      return cfg
+    }
     default:
       return {}
   }

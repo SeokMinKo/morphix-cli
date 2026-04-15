@@ -9,6 +9,8 @@ import { createOllamaProvider } from './ollama/index.js'
 import { createOpenAiProvider } from './openai/index.js'
 import { createGeminiProvider } from './gemini/index.js'
 import { createComfyuiProvider } from './comfyui/index.js'
+import { createPiapiProvider } from './piapi/index.js'
+import { createTypecastProvider } from './typecast/index.js'
 
 let registered = false
 
@@ -20,4 +22,6 @@ export function registerBuiltins(): void {
   registerProvider('gemini', createGeminiProvider)
   registerProvider('ollama', createOllamaProvider)
   registerProvider('comfyui', createComfyuiProvider)
+  registerProvider('piapi', createPiapiProvider)
+  registerProvider('typecast', createTypecastProvider)
 }

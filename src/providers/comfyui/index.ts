@@ -1,5 +1,5 @@
 import type { ImageCapability, ImageGenerateInput, ImageGenerateOptions } from '../../capabilities/image.js'
-import type { MusicCapability, MusicGenerateInput, MusicGenerateOptions } from '../../capabilities/music.js'
+import type { MusicCapability, MusicCoverInput, MusicGenerateInput, MusicGenerateOptions } from '../../capabilities/music.js'
 import type {
   VideoCapability,
   VideoGenerateInput,
@@ -31,6 +31,7 @@ const DEFAULT_ENDPOINT = 'http://localhost:8188'
 export function createComfyuiProvider(cfg: ProviderConfig): Provider {
   const endpoint = cfg.endpoint ?? DEFAULT_ENDPOINT
   const workflowPath = cfg.extra?.workflow
+  const coverWorkflowPath = cfg.extra?.coverWorkflow
   const client = new ComfyClient(endpoint)
 
   async function runAndCollect(
@@ -62,6 +63,22 @@ export function createComfyuiProvider(cfg: ProviderConfig): Provider {
     input: ImageGenerateInput,
     model: string,
   ): Promise<WorkflowGraph> {
+    // Subject refs: when present, upload them and expose SUBJECT_REF /
+    // SUBJECT_REF_2 / ... placeholders. The user's workflow JSON decides
+    // whether to use them (typically via a LoadImage + IPAdapter chain).
+    let subjectVars: Record<string, string | number> = {}
+    if (input.subjectRefs && input.subjectRefs.length > 0) {
+      const tmpFiles = await writeTempImages(input.subjectRefs)
+      const uploaded: string[] = []
+      for (const f of tmpFiles) {
+        const r = await client.upload(f)
+        uploaded.push(r.name)
+      }
+      subjectVars.SUBJECT_REF = uploaded[0]
+      uploaded.forEach((name, i) => {
+        if (i > 0) subjectVars[`SUBJECT_REF_${i + 1}`] = name
+      })
+    }
     if (workflowPath) {
       return loadWorkflow(workflowPath, {
         PROMPT: input.prompt,
@@ -69,6 +86,7 @@ export function createComfyuiProvider(cfg: ProviderConfig): Provider {
         WIDTH: parseAspect(input.aspectRatio ?? input.size ?? '1024x1024').width,
         HEIGHT: parseAspect(input.aspectRatio ?? input.size ?? '1024x1024').height,
         SEED: Math.floor(Math.random() * 2 ** 31),
+        ...subjectVars,
       })
     }
     const { width, height } = parseAspect(input.aspectRatio ?? input.size ?? '1024x1024')
@@ -78,6 +96,22 @@ export function createComfyuiProvider(cfg: ProviderConfig): Provider {
       height,
       checkpoint: model.endsWith('.safetensors') ? model : undefined,
     })
+  }
+
+  async function writeTempImages(
+    refs: NonNullable<ImageGenerateInput['subjectRefs']>,
+  ): Promise<string[]> {
+    const { tmpdir } = await import('node:os')
+    const { writeFile } = await import('node:fs/promises')
+    const { join: joinPath } = await import('node:path')
+    const out: string[] = []
+    for (const ref of refs) {
+      const ext = ref.mime === 'image/jpeg' ? 'jpg' : ref.mime === 'image/webp' ? 'webp' : 'png'
+      const p = joinPath(tmpdir(), `morphix-subject-${Date.now()}-${out.length}.${ext}`)
+      await writeFile(p, ref.bytes)
+      out.push(p)
+    }
+    return out
   }
 
   const image: ImageCapability = {
@@ -159,6 +193,31 @@ export function createComfyuiProvider(cfg: ProviderConfig): Provider {
         INSTRUMENTAL: input.instrumental ? '1' : '0',
         DURATION: input.durationSec ?? 30,
         GENRE: input.genre ?? '',
+        SEED: Math.floor(Math.random() * 2 ** 31),
+      })
+      const { files } = await runAndCollect(graph)
+      return { kind: 'sync', assets: await filesToAssets(files, 'audio') }
+    },
+    async cover(input: MusicCoverInput, _opts: MusicGenerateOptions) {
+      const wfPath = coverWorkflowPath ?? workflowPath
+      if (!wfPath) {
+        throw new MorphixError(`ComfyUI music cover requires a workflow file.`, {
+          code: 'E_NO_WORKFLOW',
+          exitCode: 64,
+          hint:
+            `Provide an audio→audio (I2A) workflow such as ACE-Step cover:\n` +
+            `  mx config set --key providers.comfyui.extra.coverWorkflow --value /path/to/ace-cover.json\n` +
+            `Workflow placeholders consumed: $INPUT_AUDIO $STRENGTH $PROMPT $LYRICS $DURATION $SEED`,
+        })
+      }
+      // Upload the source audio so the workflow can reference it by name.
+      const uploaded = await client.upload(input.referenceAudioPath)
+      const graph = await loadWorkflow(wfPath, {
+        INPUT_AUDIO: uploaded.name,
+        STRENGTH: input.strength ?? 0.75,
+        PROMPT: input.prompt ?? '',
+        LYRICS: input.lyrics ?? '',
+        DURATION: input.durationSec ?? 0,
         SEED: Math.floor(Math.random() * 2 ** 31),
       })
       const { files } = await runAndCollect(graph)

@@ -149,6 +149,41 @@ export function createOpenAiProvider(cfg: ProviderConfig): Provider {
     async generate(input: ImageGenerateInput, opts: ImageGenerateOptions) {
       // OpenAI images endpoint. `size` is "WxH" or keywords like "auto"/"1024x1024".
       const size = normalizeSize(input.size ?? input.aspectRatio)
+
+      // If the caller provided subject/character references, switch to the
+      // /v1/images/edits endpoint which accepts image[] uploads. gpt-image-1
+      // uses them as visual conditioning for the generated output. No mask
+      // is sent → the whole output is "new", just guided by the refs.
+      if (input.subjectRefs && input.subjectRefs.length > 0) {
+        const editsJson = await openaiImagesEdits({
+          endpoint,
+          apiKey,
+          model: opts.model,
+          prompt: input.prompt,
+          n: input.n ?? 1,
+          size,
+          subjectRefs: input.subjectRefs,
+          signal: opts.signal,
+        })
+        const assets: Asset[] = (editsJson.data ?? []).map((d) => {
+          if (d.b64_json) {
+            return {
+              kind: 'image' as const,
+              bytes: Buffer.from(d.b64_json, 'base64'),
+              mime: 'image/png',
+              ext: 'png',
+            }
+          }
+          return { kind: 'image' as const, url: d.url ?? '', mime: 'image/png', ext: 'png' }
+        })
+        return {
+          assets,
+          usage: editsJson.usage
+            ? { inputTokens: editsJson.usage.input_tokens, outputTokens: editsJson.usage.output_tokens }
+            : undefined,
+        }
+      }
+
       const json = (await httpJson({
         provider: 'openai',
         url: `${endpoint}/v1/images/generations`,
@@ -302,6 +337,75 @@ export function createOpenAiProvider(cfg: ProviderConfig): Provider {
   }
 
   return makeProvider('openai', { text, vision, image, speech, search })
+}
+
+/**
+ * POST to /v1/images/edits with multipart/form-data. We hand-build the
+ * multipart body instead of using the global FormData/fetch body path so
+ * that we stay on the project's httpRequest() (uniform error handling,
+ * ProviderHttpError on non-2xx) while still sending correct boundaries.
+ */
+async function openaiImagesEdits(args: {
+  endpoint: string
+  apiKey: string
+  model: string
+  prompt: string
+  n: number
+  size: string
+  subjectRefs: Array<{ bytes: Uint8Array; mime: string }>
+  signal?: AbortSignal
+}): Promise<{
+  data: Array<{ b64_json?: string; url?: string }>
+  usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number }
+}> {
+  const boundary = `----morphix-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`
+  const parts: Uint8Array[] = []
+  const enc = new TextEncoder()
+  const push = (s: string) => parts.push(enc.encode(s))
+
+  const field = (name: string, value: string) => {
+    push(`--${boundary}\r\n`)
+    push(`Content-Disposition: form-data; name="${name}"\r\n\r\n`)
+    push(`${value}\r\n`)
+  }
+  field('model', args.model)
+  field('prompt', args.prompt)
+  field('n', String(args.n))
+  field('size', args.size)
+
+  let i = 0
+  for (const ref of args.subjectRefs) {
+    const ext = ref.mime === 'image/jpeg' ? 'jpg' : ref.mime === 'image/webp' ? 'webp' : 'png'
+    push(`--${boundary}\r\n`)
+    push(`Content-Disposition: form-data; name="image[]"; filename="subject-${i++}.${ext}"\r\n`)
+    push(`Content-Type: ${ref.mime}\r\n\r\n`)
+    parts.push(ref.bytes)
+    push(`\r\n`)
+  }
+  push(`--${boundary}--\r\n`)
+
+  const total = parts.reduce((s, p) => s + p.byteLength, 0)
+  const body = new Uint8Array(total)
+  let off = 0
+  for (const p of parts) {
+    body.set(p, off)
+    off += p.byteLength
+  }
+
+  const res = await httpRequest({
+    provider: 'openai',
+    url: `${args.endpoint}/v1/images/edits`,
+    headers: {
+      authorization: `Bearer ${args.apiKey}`,
+      'content-type': `multipart/form-data; boundary=${boundary}`,
+    },
+    body,
+    signal: args.signal,
+  })
+  return (await res.json()) as {
+    data: Array<{ b64_json?: string; url?: string }>
+    usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number }
+  }
 }
 
 function normalizeSize(spec: string | undefined): string {

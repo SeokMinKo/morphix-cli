@@ -166,13 +166,36 @@ export function createGeminiProvider(cfg: ProviderConfig): Provider {
 
   const image: ImageCapability = {
     async generate(input: ImageGenerateInput, opts: ImageGenerateOptions) {
-      // Route by model: Imagen models use :predict; gemini-*-image models use :generateContent.
+      const hasRefs = !!(input.subjectRefs && input.subjectRefs.length > 0)
+
+      // Imagen models (imagen-3*) use :predict, and support
+      // referenceImages[] for subject-conditioned generation.
       if (opts.model.startsWith('imagen-')) {
+        // Ensure the prompt includes a [1] reference token when subjectRefs
+        // are provided — Imagen requires it to anchor the reference.
+        let prompt = input.prompt
+        if (hasRefs && !/\[\d+\]/.test(prompt)) {
+          prompt = `${prompt} [1]`
+        }
+        const instance: Record<string, unknown> = { prompt }
+        if (hasRefs) {
+          instance.referenceImages = input.subjectRefs!.map((ref, i) => ({
+            referenceType: 'REFERENCE_TYPE_SUBJECT',
+            referenceId: i + 1,
+            referenceImage: {
+              bytesBase64Encoded: Buffer.from(ref.bytes).toString('base64'),
+            },
+            subjectImageConfig: {
+              subjectType: 'SUBJECT_TYPE_PERSON',
+              ...(ref.description ? { subjectDescription: ref.description } : {}),
+            },
+          }))
+        }
         const json = (await httpJson({
           provider: 'gemini',
           url: keyed(modelUrl(opts.model, 'predict')),
           json: {
-            instances: [{ prompt: input.prompt }],
+            instances: [instance],
             parameters: {
               sampleCount: input.n ?? 1,
               aspectRatio: input.aspectRatio ?? '1:1',
@@ -188,12 +211,26 @@ export function createGeminiProvider(cfg: ProviderConfig): Provider {
         }))
         return { assets }
       }
-      // gemini-*-image-* models go through generateContent with AUDIO/IMAGE modalities.
+
+      // gemini-*-image-* models go through generateContent with IMAGE modality.
+      // Subject refs are sent as inlineData parts alongside the text prompt.
+      const userParts: Array<Record<string, unknown>> = []
+      if (hasRefs) {
+        for (const ref of input.subjectRefs!) {
+          userParts.push({
+            inlineData: {
+              mimeType: ref.mime,
+              data: Buffer.from(ref.bytes).toString('base64'),
+            },
+          })
+        }
+      }
+      userParts.push({ text: input.prompt })
       const json = (await httpJson({
         provider: 'gemini',
         url: keyed(modelUrl(opts.model, 'generateContent')),
         json: {
-          contents: [{ role: 'user', parts: [{ text: input.prompt }] }],
+          contents: [{ role: 'user', parts: userParts }],
           generationConfig: { responseModalities: ['IMAGE'] },
         },
         signal: opts.signal,

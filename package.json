@@ -1,7 +1,7 @@
 {
   "name": "morphix-cli",
   "version": "0.1.0",
-  "description": "All-in-one multimedia CLI — text, image, video, audio processing in a single tool",
+  "description": "Multi-provider AI generation CLI — text, image, video, speech, music, vision, and search with swappable providers per feature",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -21,12 +21,21 @@
   },
   "keywords": [
     "cli",
-    "multimedia",
+    "ai",
+    "llm",
+    "generative-ai",
     "text",
     "image",
     "video",
-    "audio",
-    "converter"
+    "speech",
+    "music",
+    "vision",
+    "search",
+    "anthropic",
+    "openai",
+    "gemini",
+    "ollama",
+    "comfyui"
   ],
   "license": "MIT",
   "devDependencies": {
